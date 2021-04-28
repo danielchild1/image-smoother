@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
 
 	Kokkos::initialize(argc, argv);
 	{
-		string filename = "HK-7_left_H6D-400c-MS.bmp";
+		string filename = "/share/HK-7_left_H6D-400c-MS.bmp";
 		//std::uintmax_t filesize = std::filesystem::file_size(filename);
 		//printf("The file size is %ju\n", filesize);
 		// Open File
@@ -138,6 +138,12 @@ int main(int argc, char** argv) {
 
 		fout.seekp(offset, ios::beg);
 		//TODO: Copy out the rest of the view to file (hint, use fout.put())
+		for (int c = 0; c < width; c++) {
+			for (int r = 0; r < height; r++) {
+				fout.put(outputFile(r, c));
+			}
+		}
+		
 		fout.close();
 	}
 	Kokkos::finalize();

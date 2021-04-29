@@ -1,5 +1,6 @@
 ﻿#include <Kokkos_Core.hpp>
 #include <fstream>
+#include <chrono>
 //#include <filesystem>
 #include <cstdio>
 #include <string>
@@ -9,7 +10,7 @@ using std::ios;
 using std::ifstream;
 using std::ofstream;
 
-double duration(std::chrono::high_resolution_clock::time_pointstart, std::chrono::high_resolution_clock::time_point end) {
+double duration(std::chrono::high_resolution_clock::time_point start, std::chrono::high_resolution_clock::time_point end) {
 	return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
@@ -23,7 +24,7 @@ int main(int argc, char** argv) {
 		// Open File
 		ifstream fin(filename, ios::in | ios::binary);
 
-		if(!fin.is_open()) {
+		if (!fin.is_open()) {
 			printf("File not opened\n");
 			return -1;
 		}// The first 14 bytes are the header, containing four values.  Get those four values.
@@ -64,8 +65,8 @@ int main(int argc, char** argv) {
 
 
 		// Read the data part of the file
-		unsigned char* h_buffer = new unsigned char[filesize-offset];
-		fin.read((char*)h_buffer, filesize-offset);
+		unsigned char* h_buffer = new unsigned char[filesize - offset];
+		fin.read((char*)h_buffer, filesize - offset);
 		std::chrono::high_resolution_clock::time_point start;
 		std::chrono::high_resolution_clock::time_point end;
 
@@ -73,26 +74,31 @@ int main(int argc, char** argv) {
 		printf("The second pixel is to the right.  Its blue/green/red values are (%u, %u, %u)\n", h_buffer[3], h_buffer[4], h_buffer[5]);
 
 		// TODO: Read the image into Kokkos views 
-		Kokkos::View<char**, Kokkos::LayoutRight> inputImage("inputImage", rowSize, height);
-		Kokkos::View<char**, Kokkos::LayoutRight> outputImage("outputImage", rowSize, height);
-		for (int i = 0; i < height; i++) {
-			for (int j = 0; j < rowSize; j++) {
-				char temp;
-				fin.read((char*)&temp, 1);
-				inputImage(i, j) = temp;
-			}
+		Kokkos::View<char**, Kokkos::LayoutRight> inputImage("inputImage", height, rowSize);
+		Kokkos::View<char**, Kokkos::LayoutRight> outputImage("outputImage", height, rowSize);
+
+		Kokkos::View<char**, Kokkos::LayoutRight>::HostMirror hostIn = create_mirror(inputImage);
+		Kokkos::View<char**, Kokkos::LayoutRight>::HostMirror hostOut = create_mirror(outputImage);
+
+		for (int i = 0; i < height * rowSize; i++) {
+			int c = i % rowSize;
+			int r = i / rowSize;
+			hostIn(r, c) = h_buffer[(r * rowSize) + c];
 		}
+
+		Kokkos::deep_copy(inputImage, hostIn);
+
 
 		// i/j with height/width.
 		delete[] h_buffer;
 		// BLUE GREEN RED
 		start = std::chrono::high_resolution_clock::now();
 		// TODO: Perform the blurring
-		Kokkos::parallel_for(Kokkos::RangePolicy<>(0, rowSize * height),
+		Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::Serial>(0, rowSize * height),
 			KOKKOS_LAMBDA(const int n) {
 			int i = n / height;
 			int j = n % rowSize;
-			if (i >= 3 && j >= 3 && j < width-3 && i < height-3) {
+			if (i >= 3 && j >= 3 && j < rowSize - 3 && i < height - 3) {
 				char storagePlace = inputImage(i, j);
 				storagePlace *= 41;
 				//26
@@ -106,21 +112,33 @@ int main(int argc, char** argv) {
 				//1
 				storagePlace += (inputImage(i - 2, j + 6) + inputImage(i + 2, j + 6) + inputImage(i + 2, j - 6) + +inputImage(i - 2, j - 6));
 
-				outputImage(i,j) = storagePlace/271;
+				outputImage(i, j) = storagePlace / 271;
 			}
+			else {
+				outputImage(i, j) = inputImage(i, j);
+			}
+			//outputImage(i,j) = inputImage(i,j);
+
 
 		}
-			
-			)
 
-		end = std::chrono::high_resolution_clock::now();printf("Time -%g ms\n", duration(start,end));
+		);
+
+		end = std::chrono::high_resolution_clock::now();
+
+
+		printf("Time %g ms\n", duration(start, end));
+
+		Kokkos::deep_copy(hostOut, outputImage);
 
 		// TODO: Verification
-		printf("The red, green, blue at (8353, 9111) (origin bottom left) is (%d, %d, %d)\n", 0, 0, 0);
-		printf("The red, green, blue at (8351, 9113) (origin bottom left) is (%d, %d, %d)\n", 0, 0, 0);
-		printf("The red, green, blue at (6352, 15231) (origin bottom left) is (%d, %d, %d)\n", 0, 0, 0);
-		printf("The red, green, blue at (10559, 10611) (origin bottom left) is (%d, %d, %d)\n", 0, 0, 0);
-		printf("The red, green, blue at (10818, 20226) (origin bottom left) is (%d, %d, %d)\n", 0, 0, 0);
+		// BLUE GREEN RED
+		printf("Did not make it to the print out\n");
+		printf("The red, green, blue at (8353, 9111) (origin bottom left) is (%d, %d, %d)\n", hostOut(8353, (9111 * 3) + 2), hostOut(8353, (9111 * 3) + 1), hostOut(8353, (9111 * 3)));
+		printf("The red, green, blue at (8351, 9113) (origin bottom left) is (%d, %d, %d)\n", hostOut(8351, 27333 + 2), hostOut(8351, 27333 + 1), hostOut(8351, 27333));
+		printf("The red, green, blue at (6352, 15231) (origin bottom left) is (%d, %d, %d)\n", hostOut(6352, 45963 + 2), hostOut(6352, 45963 + 1), hostOut(6352, 45963));
+		printf("The red, green, blue at (10559, 10611) (origin bottom left) is (%d, %d, %d)\n", hostOut(10559, 31833 + 2), hostOut(10559, 31833 + 1), hostOut(10559, 31833));
+		printf("The red, green, blue at (10818, 20226) (origin bottom left) is (%d, %d, %d)\n", hostOut(10818, 60678 + 2), hostOut(10818, 60678 + 1), hostOut(10818, 60678));
 
 		//print out to file output.bmp
 		string outputFile = "output.bmp";
@@ -138,12 +156,13 @@ int main(int argc, char** argv) {
 
 		fout.seekp(offset, ios::beg);
 		//TODO: Copy out the rest of the view to file (hint, use fout.put())
-		for (int c = 0; c < width; c++) {
-			for (int r = 0; r < height; r++) {
-				fout.put(outputFile(r, c));
-			}
+		printf("it made it to print the two for loops\n");
+		for (int i = 0; i < height * rowSize; i++) {
+			int c = i % rowSize;
+			int r = i / rowSize;
+			fout.put(hostOut(r, c));
 		}
-		
+
 		fout.close();
 	}
 	Kokkos::finalize();

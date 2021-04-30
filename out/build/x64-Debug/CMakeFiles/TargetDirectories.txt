@@ -1,3 +1,0 @@
-C:/Users/child/source/repos/image-smoother/image-smoother/out/build/x64-Debug/CMakeFiles/image-smoother.dir
-C:/Users/child/source/repos/image-smoother/image-smoother/out/build/x64-Debug/CMakeFiles/edit_cache.dir
-C:/Users/child/source/repos/image-smoother/image-smoother/out/build/x64-Debug/CMakeFiles/rebuild_cache.dir

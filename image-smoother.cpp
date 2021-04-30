@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
 
 	Kokkos::initialize(argc, argv);
 	{
-		string filename = "/share/HK-7_left_H6D-400c-MS.bmp";
+		string filename = "/share/HK-7_left_H6D-400c-MS_screw.bmp";
 		//std::uintmax_t filesize = std::filesystem::file_size(filename);
 		//printf("The file size is %ju\n", filesize);
 		// Open File
@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
 
 		Kokkos::View<char**, Kokkos::LayoutRight>::HostMirror hostIn = create_mirror(inputImage);
 		Kokkos::View<char**, Kokkos::LayoutRight>::HostMirror hostOut = create_mirror(outputImage);
-
+		printf("location a\n");
 		for (int i = 0; i < height * rowSize; i++) {
 			int c = i % rowSize;
 			int r = i / rowSize;
@@ -88,41 +88,46 @@ int main(int argc, char** argv) {
 
 		Kokkos::deep_copy(inputImage, hostIn);
 
-
+		printf("location b\n");
 		// i/j with height/width.
 		delete[] h_buffer;
 		// BLUE GREEN RED
 		start = std::chrono::high_resolution_clock::now();
 		// TODO: Perform the blurring
-		Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::Serial>(0, rowSize * height),
+		Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::Cuda>(0, rowSize * height),
 			KOKKOS_LAMBDA(const int n) {
-			int i = n / height;
-			int j = n % rowSize;
-			if (i >= 3 && j >= 3 && j < rowSize - 3 && i < height - 3) {
-				char storagePlace = inputImage(i, j);
-				storagePlace *= 41;
-				//26
-				storagePlace += (inputImage(i - 1, j) * 26 + inputImage(i + 1, j) * 26 + inputImage(i, j + 3) * 26 + inputImage(i, j - 3) * 26);
-				//16
-				storagePlace += (inputImage(i + 1, j + 3) * 16 + inputImage(i - 1, j + 3) * 16 + inputImage(i - 1, j - 3) * 16 + inputImage(i - 1, j + 3) * 16);
-				//7
-				storagePlace += (inputImage(i - 2, j) * 7 + inputImage(i + 2, j) * 7 + inputImage(i, j + 6) * 7 + inputImage(i, j - 6) * 7);
-				//4
-				storagePlace += (inputImage(i + 2, j + 3) * 4 + inputImage(i + 1, j + 6) * 4 + inputImage(i - 1, j + 6) * 4 + inputImage(i + 2, j + 3) * 4 + inputImage(i + 2, j - 3) * 4 + inputImage(i + 1, j - 6) * 4 + inputImage(i - 1, j - 6) * 4 + inputImage(i - 2, j - 3) * 4);
-				//1
-				storagePlace += (inputImage(i - 2, j + 6) + inputImage(i + 2, j + 6) + inputImage(i + 2, j - 6) + +inputImage(i - 2, j - 6));
+			int j = n % rowSize; //col
+			int i = n / rowSize; //row
 
-				outputImage(i, j) = storagePlace / 271;
+			
+			
+			if (i < 3 ||  i > (height - 4) || j < 7 || j > (rowSize - 8) ) {
+				outputImage(i, j) = inputImage(i, j);
+				
 			}
 			else {
-				outputImage(i, j) = inputImage(i, j);
-			}
-			//outputImage(i,j) = inputImage(i,j);
+			int32_t storagePlace = inputImage(i, j);
+				storagePlace *= 41;
+				//26
+				storagePlace += (26 * (inputImage(i - 1, j)  + inputImage(i + 1, j) + inputImage(i, j + 3) + inputImage(i, j - 3)));
+				//16
+				storagePlace += (16 * (inputImage(i + 1, j + 3) + inputImage(i + 1, j - 3) + inputImage(i - 1, j - 3)  + inputImage(i - 1, j + 3) ));
+				//7
+				storagePlace += (7 * (inputImage(i - 2, j) + inputImage(i + 2, j) + inputImage(i, j + 6) + inputImage(i, j - 6)));
+				//4
+				storagePlace += (4 * (inputImage(i + 2, j + 3) + inputImage(i + 1, j + 6) + inputImage(i - 1, j + 6) + inputImage(i - 2, j + 3) + inputImage(i + 2, j - 3) + inputImage(i + 1, j - 6) + inputImage(i - 1, j - 6) + inputImage(i - 2, j - 3)));
+				//1
+				storagePlace += (inputImage(i - 2, j + 6) + inputImage(i + 2, j + 6) + inputImage(i + 2, j - 6) + inputImage(i - 2, j - 6));
 
+				outputImage(i, j) = storagePlace / 273;
+			}
+			
 
 		}
 
 		);
+		// printf("does: %d, doesNot: %d\n", does, doesNot);
+		printf("location c\n");
 
 		end = std::chrono::high_resolution_clock::now();
 
@@ -133,15 +138,15 @@ int main(int argc, char** argv) {
 
 		// TODO: Verification
 		// BLUE GREEN RED
-		printf("Did not make it to the print out\n");
-		printf("The red, green, blue at (8353, 9111) (origin bottom left) is (%d, %d, %d)\n", hostOut(8353, (9111 * 3) + 2), hostOut(8353, (9111 * 3) + 1), hostOut(8353, (9111 * 3)));
-		printf("The red, green, blue at (8351, 9113) (origin bottom left) is (%d, %d, %d)\n", hostOut(8351, 27333 + 2), hostOut(8351, 27333 + 1), hostOut(8351, 27333));
-		printf("The red, green, blue at (6352, 15231) (origin bottom left) is (%d, %d, %d)\n", hostOut(6352, 45963 + 2), hostOut(6352, 45963 + 1), hostOut(6352, 45963));
-		printf("The red, green, blue at (10559, 10611) (origin bottom left) is (%d, %d, %d)\n", hostOut(10559, 31833 + 2), hostOut(10559, 31833 + 1), hostOut(10559, 31833));
-		printf("The red, green, blue at (10818, 20226) (origin bottom left) is (%d, %d, %d)\n", hostOut(10818, 60678 + 2), hostOut(10818, 60678 + 1), hostOut(10818, 60678));
+		// printf("Did not make it to the print out\n");
+		// printf("The red, green, blue at (8353, 9111) (origin bottom left) is (%d, %d, %d)\n", hostOut(8353, (9111 * 3) + 2), hostOut(8353, (9111 * 3) + 1), hostOut(8353, (9111 * 3)));
+		// printf("The red, green, blue at (8351, 9113) (origin bottom left) is (%d, %d, %d)\n", hostOut(8351, 27333 + 2), hostOut(8351, 27333 + 1), hostOut(8351, 27333));
+		// printf("The red, green, blue at (6352, 15231) (origin bottom left) is (%d, %d, %d)\n", hostOut(6352, 45963 + 2), hostOut(6352, 45963 + 1), hostOut(6352, 45963));
+		// printf("The red, green, blue at (10559, 10611) (origin bottom left) is (%d, %d, %d)\n", hostOut(10559, 31833 + 2), hostOut(10559, 31833 + 1), hostOut(10559, 31833));
+		// printf("The red, green, blue at (10818, 20226) (origin bottom left) is (%d, %d, %d)\n", hostOut(10818, 60678 + 2), hostOut(10818, 60678 + 1), hostOut(10818, 60678));
 
 		//print out to file output.bmp
-		string outputFile = "output.bmp";
+		string outputFile = "screw-dan.bmp";
 		ofstream fout;
 		fout.open(outputFile, ios::binary);
 
@@ -156,12 +161,12 @@ int main(int argc, char** argv) {
 
 		fout.seekp(offset, ios::beg);
 		//TODO: Copy out the rest of the view to file (hint, use fout.put())
-		printf("it made it to print the two for loops\n");
 		for (int i = 0; i < height * rowSize; i++) {
 			int c = i % rowSize;
 			int r = i / rowSize;
-			fout.put(hostOut(r, c));
+			fout.put((char)hostOut(r, c));
 		}
+		printf("Location D\n");
 
 		fout.close();
 	}

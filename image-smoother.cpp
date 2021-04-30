@@ -1,7 +1,6 @@
 ﻿#include <Kokkos_Core.hpp>
 #include <fstream>
 #include <chrono>
-//#include <filesystem>
 #include <cstdio>
 #include <string>
 
@@ -18,7 +17,7 @@ int main(int argc, char** argv) {
 
 	Kokkos::initialize(argc, argv);
 	{
-		string filename = "/share/HK-7_left_H6D-400c-MS_screw.bmp";
+		string filename = "/share/HK-7_left_H6D-400c-MS.bmp";
 		//std::uintmax_t filesize = std::filesystem::file_size(filename);
 		//printf("The file size is %ju\n", filesize);
 		// Open File
@@ -37,18 +36,18 @@ int main(int argc, char** argv) {
 		fin.read((char*)&filesize, 4);
 		fin.read((char*)&dummy, 4);
 		fin.read((char*)&offset, 4);
-		printf("header: %c%c\n", header[0], header[1]);
-		printf("filesize: %u\n", filesize);
-		printf("dummy %u\n", dummy);
-		printf("offset: %u\n", offset);
+		// printf("header: %c%c\n", header[0], header[1]);
+		// printf("filesize: %u\n", filesize);
+		// printf("dummy %u\n", dummy);
+		// printf("offset: %u\n", offset);
 		int32_t sizeOfHeader;
 		int32_t width;
 		int32_t height;
 		fin.read((char*)&sizeOfHeader, 4);
 		fin.read((char*)&width, 4);
 		fin.read((char*)&height, 4);
-		printf("The width: %d\n", width);
-		printf("The height: %d\n", height);
+		// printf("The width: %d\n", width);
+		// printf("The height: %d\n", height);
 		uint16_t numColorPanes;
 		uint16_t numBitsPerPixel;
 		fin.read((char*)&numColorPanes, 2);
@@ -69,9 +68,14 @@ int main(int argc, char** argv) {
 		fin.read((char*)h_buffer, filesize - offset);
 		std::chrono::high_resolution_clock::time_point start;
 		std::chrono::high_resolution_clock::time_point end;
-
-		printf("The first pixel is located in the bottom left.  Its blue/green/red values are (%u, %u, %u)\n", h_buffer[0], h_buffer[1], h_buffer[2]);
-		printf("The second pixel is to the right.  Its blue/green/red values are (%u, %u, %u)\n", h_buffer[3], h_buffer[4], h_buffer[5]);
+		std::chrono::high_resolution_clock::time_point startLoadingView;
+		std::chrono::high_resolution_clock::time_point endLoadingView;
+		std::chrono::high_resolution_clock::time_point startDeepCopytoGPU;
+		std::chrono::high_resolution_clock::time_point endDeepCopytoGPU;
+		std::chrono::high_resolution_clock::time_point startDeepCopyFromGPU;
+		std::chrono::high_resolution_clock::time_point endDeepCopyFromGPU;
+		std::chrono::high_resolution_clock::time_point StartWrittingFromView;
+		std::chrono::high_resolution_clock::time_point  EndWrittingFromView;
 
 		// TODO: Read the image into Kokkos views 
 		Kokkos::View<char**, Kokkos::LayoutRight> inputImage("inputImage", height, rowSize);
@@ -79,19 +83,21 @@ int main(int argc, char** argv) {
 
 		Kokkos::View<char**, Kokkos::LayoutRight>::HostMirror hostIn = create_mirror(inputImage);
 		Kokkos::View<char**, Kokkos::LayoutRight>::HostMirror hostOut = create_mirror(outputImage);
-		printf("location a\n");
+
+		startLoadingView = std::chrono::high_resolution_clock::now();
 		for (int i = 0; i < height * rowSize; i++) {
 			int c = i % rowSize;
 			int r = i / rowSize;
 			hostIn(r, c) = h_buffer[(r * rowSize) + c];
 		}
+		endLoadingView = std::chrono::high_resolution_clock::now();
 
+		startDeepCopytoGPU = std::chrono::high_resolution_clock::now();
 		Kokkos::deep_copy(inputImage, hostIn);
+		endDeepCopytoGPU = std::chrono::high_resolution_clock::now();
 
-		printf("location b\n");
 		// i/j with height/width.
 		delete[] h_buffer;
-		// BLUE GREEN RED
 		start = std::chrono::high_resolution_clock::now();
 		// TODO: Perform the blurring
 		Kokkos::parallel_for(Kokkos::RangePolicy<Kokkos::Cuda>(0, rowSize * height),
@@ -120,21 +126,19 @@ int main(int argc, char** argv) {
 				storagePlace += (inputImage(i - 2, j + 6) + inputImage(i + 2, j + 6) + inputImage(i + 2, j - 6) + inputImage(i - 2, j - 6));
 
 				outputImage(i, j) = storagePlace / 273;
+				
 			}
 			
 
 		}
 
 		);
-		// printf("does: %d, doesNot: %d\n", does, doesNot);
-		printf("location c\n");
 
 		end = std::chrono::high_resolution_clock::now();
-
-
-		printf("Time %g ms\n", duration(start, end));
-
+		
+		startDeepCopyFromGPU = std::chrono::high_resolution_clock::now();
 		Kokkos::deep_copy(hostOut, outputImage);
+		endDeepCopyFromGPU = std::chrono::high_resolution_clock::now();
 
 		// TODO: Verification
 		// BLUE GREEN RED
@@ -146,7 +150,7 @@ int main(int argc, char** argv) {
 		// printf("The red, green, blue at (10818, 20226) (origin bottom left) is (%d, %d, %d)\n", hostOut(10818, 60678 + 2), hostOut(10818, 60678 + 1), hostOut(10818, 60678));
 
 		//print out to file output.bmp
-		string outputFile = "screw-dan.bmp";
+		string outputFile = "output.bmp";
 		ofstream fout;
 		fout.open(outputFile, ios::binary);
 
@@ -161,14 +165,22 @@ int main(int argc, char** argv) {
 
 		fout.seekp(offset, ios::beg);
 		//TODO: Copy out the rest of the view to file (hint, use fout.put())
+		StartWrittingFromView = std::chrono::high_resolution_clock::now();
 		for (int i = 0; i < height * rowSize; i++) {
 			int c = i % rowSize;
 			int r = i / rowSize;
 			fout.put((char)hostOut(r, c));
 		}
-		printf("Location D\n");
+		EndWrittingFromView = std::chrono::high_resolution_clock::now();
 
 		fout.close();
+
+		printf("loading view %g ms\n", duration(startLoadingView, endLoadingView));
+		printf("Deep Copy %g ms\n", duration(startDeepCopytoGPU, endDeepCopytoGPU));
+		printf("Blurring %g ms\n", duration(start, end));
+		printf("Deep Copy %g ms\n", duration(startDeepCopyFromGPU, endDeepCopyFromGPU));
+		printf("Writting image from view %g ms\n", duration(StartWrittingFromView, EndWrittingFromView));
+
 	}
 	Kokkos::finalize();
 }
